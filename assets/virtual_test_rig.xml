@@ -1,18 +1,17 @@
 <mujoco model="Virtual Tire Test Rig">
     <compiler angle="degree" coordinate="local"/>
-    <option timestep="0.001" integrator="implicit" cone="elliptic"/>
+    <option timestep="0.001" integrator="implicitfast" cone="elliptic"/>
 
     <asset>
         <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
         <texture name="grid" type="2d" builtin="checker" rgb1="0.1 0.2 0.3" rgb2="0.2 0.3 0.4" width="512" height="512" mark="cross" markrgb="0.8 0.8 0.8"/>
-        <material name="grid" texture="grid" texrepeat="5 5" texuniform="true"/>
+        <material name="grid" texture="grid" texrepeat="0.1 0.1" texuniform="true"/>
+        <texture name="tire_tex" type="2d" builtin="checker" rgb1="0.1 0.1 0.1" rgb2="0.9 0.9 0.9" width="512" height="512"/>
+        <material name="tire_mat" texture="tire_tex" texrepeat="8 2" texuniform="true"/>
     </asset>
 
     <default>
-        <!-- We use velocity actuators to strictly enforce translation and spin for slip sweeps -->
-        <motor ctrllimited="true" ctrlrange="-1000 1000"/>
-        <velocity ctrllimited="true" ctrlrange="-100 100" kv="1000"/>
-        <position ctrllimited="true" ctrlrange="-180 180" kp="1000"/>
+        <!-- No global actuator defaults to avoid cross-contamination -->
     </default>
 
     <worldbody>
@@ -21,11 +20,14 @@
 
         <!-- Carriage that translates over the floor -->
         <body name="carriage" pos="0 0 0.35">
+            <!-- Chase camera following the wheel -->
+            <camera name="chase_cam" pos="-3 -3 1.5" xyaxes="1 -1 0 1 1 4"/>
+            
             <!-- X and Y translation -->
             <joint name="translate_x" type="slide" axis="1 0 0" frictionloss="0.1"/>
             <joint name="translate_y" type="slide" axis="0 1 0" frictionloss="0.1"/>
-            <!-- Z translation for vertical load -->
-            <joint name="translate_z" type="slide" axis="0 0 1" frictionloss="0.1"/>
+            <!-- Z translation for vertical load (damped to prevent bouncing) -->
+            <joint name="translate_z" type="slide" axis="0 0 1" frictionloss="0.1" damping="5000"/>
             
             <geom type="box" size="0.1 0.1 0.05" rgba="0.8 0.2 0.2 1" mass="50"/>
 
@@ -39,13 +41,15 @@
                     <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
                     <joint name="steer" type="hinge" axis="0 0 1" frictionloss="0.1"/>
                     
+                    <!-- The Contact Patch stays with the steer_link so it doesn't spin -->
+                    <site name="contact_patch" pos="0 0 -0.3" size="0.02" rgba="1 0 0 1"/>
+                    
                     <!-- The actual Wheel -->
                     <body name="wheel" pos="0 0 0">
                         <!-- Y-axis corresponds to rolling -->
                         <joint name="spin" type="hinge" axis="0 1 0" frictionloss="0.1"/>
-                        <geom name="tire" type="cylinder" size="0.3 0.1" rgba="0.1 0.1 0.1 1" mass="15" friction="1 0.005 0.0001"/>
-                        <!-- The site where Pacejka forces will eventually be applied -->
-                        <site name="contact_patch" pos="0 0 -0.3" size="0.02" rgba="1 0 0 1"/>
+                        <!-- Rotate geometry by 90 deg so its rolling axis aligns with Y -->
+                        <geom name="tire" type="ellipsoid" size="0.3 0.3 0.1" euler="90 0 0" material="tire_mat" mass="15" friction="1 0.005 0.0001" solref="0.08 1" condim="1"/>
                     </body>
                 </body>
             </body>
@@ -54,18 +58,18 @@
 
     <actuator>
         <!-- Velocity control to enforce Vx and Vy -->
-        <velocity name="drive_x" joint="translate_x" kv="1000"/>
-        <velocity name="drive_y" joint="translate_y" kv="1000"/>
+        <velocity name="drive_x" joint="translate_x" kv="10000" ctrllimited="true" ctrlrange="-100 100"/>
+        <velocity name="drive_y" joint="translate_y" kv="10000" ctrllimited="true" ctrlrange="-100 100"/>
         
-        <!-- Force control for Fz (downward force) -->
-        <motor name="load_z" joint="translate_z"/>
+        <!-- Force control for Fz (downward force). Limit needs to fully encompass 6000N load request -->
+        <motor name="load_z" joint="translate_z" ctrllimited="true" ctrlrange="-100000 100000"/>
         
         <!-- Position control for camber and slip angle (steer) -->
-        <position name="set_camber" joint="camber" kp="1000"/>
-        <position name="set_steer" joint="steer" kp="1000"/>
+        <position name="set_camber" joint="camber" kp="10000" ctrllimited="true" ctrlrange="-180 180"/>
+        <position name="set_steer" joint="steer" kp="10000" ctrllimited="true" ctrlrange="-180 180"/>
         
         <!-- Velocity control to enforce wheel spin (Omega) -->
-        <velocity name="drive_spin" joint="spin" kv="1000"/>
+        <velocity name="drive_spin" joint="spin" kv="10000" ctrllimited="true" ctrlrange="-500 500"/>
     </actuator>
 
     <sensor>
